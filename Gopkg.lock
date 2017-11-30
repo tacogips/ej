@@ -8,10 +8,22 @@
   version = "v0.16.0"
 
 [[projects]]
+  name = "github.com/boltdb/bolt"
+  packages = ["."]
+  revision = "2f1ce7a837dcb8da3ec595b1dac9d0632f0f99e8"
+  version = "v1.3.1"
+
+[[projects]]
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto","ptypes","ptypes/any","ptypes/duration","ptypes/timestamp"]
   revision = "1e59b77b52bf8e4b449a57e6f79f21226d571845"
+
+[[projects]]
+  name = "github.com/urfave/cli"
+  packages = ["."]
+  revision = "cfb38830724cc34fedffe9a2a29fb54fa9169cd1"
+  version = "v1.20.0"
 
 [[projects]]
   branch = "master"
@@ -24,6 +36,12 @@
   name = "golang.org/x/oauth2"
   packages = [".","google","internal","jws","jwt"]
   revision = "f95fa95eaa936d9d87489b15d1d18b97c1ba9c28"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/sys"
+  packages = ["unix"]
+  revision = "13fcbd661c8ececa8807a29b48407d674b1d8ed8"
 
 [[projects]]
   branch = "master"
@@ -58,6 +76,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5c691d41ea6e2405b894d985ab1484313178f1ff6797a11949d3081fa77f4875"
+  inputs-digest = "a66d5883eaf9c701fd4ea9490a3816e2dbbe8cc3bbbd7cfe0bd4f101a2bd40a3"
   solver-name = "gps-cdcl"
   solver-version = 1
