@@ -20,16 +20,15 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
 	app.Description = "simple transrator"
+	app.Usage = "ej [-c] sentense"
+	app.Flags = []cli.Flag{
+		cli.BoolFlag{
+			Name:  "c",
+			Usage: "list all caches",
+		},
+	}
 
 	app.Action = func(c *cli.Context) error {
-		src := strings.Join(c.Args(), " ")
-		if len(src) == 0 {
-			return nil
-		}
-		apiKey := os.Getenv("EJ_API_KEY")
-		if apiKey == "" {
-			return fmt.Errorf("need 'EJ_API_KEY' env variable")
-		}
 
 		dbDir := expandFilePath("$HOME/.ej")
 		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
@@ -44,6 +43,26 @@ func main() {
 			return err
 		}
 		defer db.Close()
+
+		if c.Bool("c") {
+			err = db.View(func(tx *bolt.Tx) error {
+				bucket := tx.Bucket([]byte("cache"))
+				return bucket.ForEach(func(k, v []byte) error {
+					fmt.Printf("%s\n%s\n\n", string(k), string(v))
+					return nil
+				})
+			})
+			return err
+		}
+
+		src := strings.Join(c.Args(), " ")
+		if len(src) == 0 {
+			return nil
+		}
+		apiKey := os.Getenv("EJ_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("need 'EJ_API_KEY' env variable")
+		}
 
 		var result string
 		err = db.View(func(tx *bolt.Tx) error {
