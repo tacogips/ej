@@ -2,7 +2,7 @@
 
 ## install
 ```
-github.com/tacogips/ej
+go get github.com/tacogips/ej
 ```
 
 ## usage
