@@ -10,6 +10,8 @@ go get github.com/tacogips/ej
 get google translate api key from gcp developer console,
 and set it into environment variable named `EJ_API_KEY`.
 
+https://cloud.google.com/translate/docs/getting-started
+
 ```
 export EJ_API_KEY="your_api_key"
 ```
