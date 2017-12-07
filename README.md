@@ -27,7 +27,7 @@ i am a man
 ```
 
 # Disclaimer
-This tool uses google translation api what need money.
+This tool uses google translation api that cant use free.
 Heavy use leads you to bankruptcy.
 At your own risk and wallet.
 https://cloud.google.com/translate/pricing
