@@ -24,6 +24,10 @@ i am a man
 > ej 我是一个男人
 我是一个男人
 私は男です
+
+# translate to english if input word detected as japanese
+> ej どすこい
+Sumo exclamation
 ```
 
 # Disclaimer
