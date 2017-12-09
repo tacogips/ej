@@ -19,8 +19,9 @@ import (
 func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
-	app.Description = "simple transrator"
-	app.Usage = "ej [-c] sentense"
+	app.Description = "simple translator"
+	app.Usage = "ej sentense"
+	app.Commands = nil
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
 			Name:  "c",
@@ -28,7 +29,7 @@ func main() {
 		},
 		cli.BoolFlag{
 			Name:  "f",
-			Usage: "force translate. dont use cache",
+			Usage: "force translate. not use cache",
 		},
 	}
 
