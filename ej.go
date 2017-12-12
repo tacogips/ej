@@ -20,8 +20,9 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
 	app.Description = "simple translator"
-	app.Usage = "ej sentense"
+	app.Usage = "ej [sentense]"
 	app.Commands = nil
+	app.Version = "0.0.1"
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
 			Name:  "c",
@@ -30,6 +31,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "f",
 			Usage: "force translate. not use cache",
+		},
+		cli.BoolFlag{
+			Name:  "r",
+			Usage: "force reverse translation(some language to english) ",
 		},
 	}
 
@@ -69,8 +74,8 @@ func main() {
 			return fmt.Errorf("need 'EJ_API_KEY' env variable")
 		}
 
-		// get from cache if exists
 		if !c.Bool("f") {
+			// get from cache if exists
 			var result string
 			err = db.View(func(tx *bolt.Tx) error {
 				bucket := tx.Bucket([]byte("cache"))
@@ -103,20 +108,25 @@ func main() {
 		destLang := language.Japanese
 		input := []string{src}
 
-		// translate to english if input is japanese
-		detectedInputLangs, err := client.DetectLanguage(ctx, input)
-		if err == nil {
-			for _, detectedInputLangsArr := range detectedInputLangs {
-				for _, detectedInputLang := range detectedInputLangsArr {
-					if detectedInputLang.Language == language.Japanese {
-						destLang = language.English
-						goto FinishDetectLang
+		if c.Bool("r") {
+			// translate to english if force reverse
+			destLang = language.English
+		} else {
+			// translate to english if input is japanese
+			detectedInputLangs, err := client.DetectLanguage(ctx, input)
+			if err == nil {
+				for _, detectedInputLangsArr := range detectedInputLangs {
+					for _, detectedInputLang := range detectedInputLangsArr {
+						if detectedInputLang.Language == language.Japanese {
+							destLang = language.English
+							goto FinishDetectLang
+						}
 					}
 				}
 			}
-		}
 
-	FinishDetectLang:
+		FinishDetectLang:
+		}
 
 		resp, err := client.Translate(ctx, input, destLang, nil)
 		if err != nil {
