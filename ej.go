@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/user"
@@ -19,10 +20,12 @@ import (
 func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
-	app.Description = "simple translator"
+	app.Description = `simple Japanese <->English translator.
+	once translated result will be cached in local database at "$HOME/.ej"`
+
 	app.Usage = "ej [sentense]"
 	app.Commands = nil
-	app.Version = "0.0.1"
+	app.Version = "0.0.2"
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
 			Name:  "c",
@@ -36,9 +39,20 @@ func main() {
 			Name:  "r",
 			Usage: "force reverse translation(some language to english) ",
 		},
+		cli.BoolFlag{
+			Name:  "json",
+			Usage: "output in json format",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
+
+		var printer func(tr Translate)
+		if c.Bool("json") {
+			printer = jsonPrinter
+		} else {
+			printer = plainPrinter
+		}
 
 		dbDir := expandFilePath("$HOME/.ej")
 		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
@@ -58,7 +72,12 @@ func main() {
 			err = db.View(func(tx *bolt.Tx) error {
 				bucket := tx.Bucket([]byte("cache"))
 				return bucket.ForEach(func(k, v []byte) error {
-					fmt.Printf("%s\n%s\n\n", string(k), string(v))
+					cachedResult := Translate{
+						Input:      string(k),
+						Translated: string(v),
+					}
+					printer(cachedResult)
+
 					return nil
 				})
 			})
@@ -74,6 +93,7 @@ func main() {
 			return fmt.Errorf("need 'EJ_API_KEY' env variable")
 		}
 
+		// search from cache
 		if !c.Bool("f") {
 			// get from cache if exists
 			var result string
@@ -94,7 +114,11 @@ func main() {
 				return err
 			}
 			if result != "" {
-				fmt.Printf("%s\n%s\n", src, result)
+				cachedResult := Translate{
+					Input:      src,
+					Translated: result,
+				}
+				printer(cachedResult)
 				return nil
 			}
 		}
@@ -133,7 +157,11 @@ func main() {
 			return err
 		}
 
-		fmt.Printf("%s\n%s\n", src, resp[0].Text)
+		result := Translate{
+			Input:      src,
+			Translated: resp[0].Text,
+		}
+		printer(result)
 
 		err = db.Update(func(tx *bolt.Tx) error {
 			bucket, err := tx.CreateBucketIfNotExists([]byte("cache"))
@@ -195,4 +223,20 @@ func expandFilePath(p string) string {
 		return absp
 	}
 
+}
+
+type Translate struct {
+	Input      string `json:"input"`
+	Translated string `json:"translated"`
+}
+
+func plainPrinter(tr Translate) {
+	fmt.Fprintf(os.Stdout, "%s\n%s\n\n", tr.Input, tr.Translated)
+}
+
+func jsonPrinter(tr Translate) {
+	j, err := json.Marshal(tr)
+	if err == nil {
+		fmt.Fprintf(os.Stdout, "%s\n", string(j))
+	}
 }
