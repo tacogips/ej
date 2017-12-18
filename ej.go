@@ -22,7 +22,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
 	app.Description = `simple Japanese <->English translator.
-	once translated result will be cached in local database at "$HOME/.ej"`
+	 once translated result will be cached in local database at "$HOME/.ej"`
 
 	app.Usage = "ej [sentense]"
 	app.Commands = nil
