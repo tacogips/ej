@@ -30,10 +30,14 @@ i am a man
 # translate to english if input word detected as japanese
 > ej どすこい
 Sumo exclamation
+
+# show all caches json
+> ej -c -json
+[{"input":"脆弱a","translated":"Vulnerable"},{"input":"脆弱性","translated":"Vulnerability"}]
 ```
 
 # Disclaimer
-This tool uses google translation api that cant use free.
-Heavy use leads you to bankruptcy.
+This tool uses google translation api that not cost-free.
+Heavy using leads you to bankruptcy.
 At your own risk and wallet.
 https://cloud.google.com/translate/pricing
