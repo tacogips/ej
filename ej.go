@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"os"
@@ -12,11 +13,17 @@ import (
 
 	"golang.org/x/text/language"
 
+	rapidAPISDK "github.com/RapidSoftwareSolutions/rapidapi-go-sdk/RapidAPISDK"
+
 	"cloud.google.com/go/translate"
 	"github.com/boltdb/bolt"
 	"github.com/urfave/cli"
 	"google.golang.org/api/option"
 )
+
+const EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
+const EJ_RAPID_EPI_KEY_ENV = "EJ_RAPID_EPI_KEY"
+const EJ_RAPID_API_PROJECT_NAME_ENV = "EJ_RAPID_API_PROJECT_NAME"
 
 func main() {
 	app := cli.NewApp()
@@ -95,9 +102,9 @@ func main() {
 		if len(src) == 0 {
 			return nil
 		}
-		apiKey := os.Getenv("EJ_API_KEY")
+		apiKey := os.Getenv(EJ_GOOGLE_TRANS_API_KEY_ENV)
 		if apiKey == "" {
-			return fmt.Errorf("need 'EJ_API_KEY' env variable")
+			return fmt.Errorf("need '%s' env variable", EJ_GOOGLE_TRANS_API_KEY_ENV)
 		}
 
 		// search from cache
@@ -183,6 +190,72 @@ func main() {
 	app.Run(os.Args)
 }
 
+var noDefinitionAPIKey = errors.New("no definitiion api key")
+
+func fetchDict(words []string) ([]Dict, error) {
+
+	apiKey := os.Getenv(EJ_RAPID_EPI_KEY_ENV)
+	if apiKey == "" {
+		return nil, noDefinitionAPIKey
+	}
+
+	projectName := os.Getenv(EJ_RAPID_API_PROJECT_NAME_ENV)
+	if projectName == "" {
+		return nil, noDefinitionAPIKey
+	}
+
+	api := rapidAPISDK.RapidAPI{
+		Project: projectName,
+		Key:     apiKey,
+	}
+	var result []Dict
+	for _, word := range words {
+
+		for _, caller := range dictCallers {
+			callResp := dictCall(api, word, caller)
+			switch r := callResp.(type) {
+			}
+		}
+	}
+
+	return result, nil
+}
+
+type dictCaller struct {
+	pack   string
+	block  string
+	opResp func(map[string]interface{}) interface{}
+}
+
+var dictCallers = []dictCaller{
+	{
+		pack:  "WORDS",
+		block: "",
+		opResp: func(resp map[string]interface{}) interface{} {
+			//TODO
+			panic(resp)
+		},
+	},
+}
+
+func dictCall(api rapidAPISDK.RapidAPI, word string, caller dictCaller) interface{} {
+	params := map[string]rapidAPISDK.Param{
+		"word": {
+			Type:  "string",
+			Value: word,
+		},
+	}
+
+	return caller.opResp(api.Call(caller.pack, caller.block, params))
+}
+
+type Dict struct {
+	Word        string   `json:"word"`
+	Definitions []string `json:"definitions"`
+	Synonyms    []string `json:"synonyms"`
+	Antonyms    []string `json:"anotonyms"`
+}
+
 func expandFilePath(p string) string {
 	trimPath := strings.TrimSpace(p)
 	isAbs := filepath.IsAbs(trimPath)
@@ -229,6 +302,7 @@ func expandFilePath(p string) string {
 type Translate struct {
 	Input      string `json:"input"`
 	Translated string `json:"translated"`
+	Dicts      []Dict `json:"dicts"`
 }
 
 func newTranslate(input string, translated string) Translate {
