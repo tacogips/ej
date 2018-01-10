@@ -6,14 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/text/language"
-
-	rapidAPISDK "github.com/RapidSoftwareSolutions/rapidapi-go-sdk/RapidAPISDK"
 
 	"cloud.google.com/go/translate"
 	"github.com/boltdb/bolt"
@@ -22,10 +22,10 @@ import (
 )
 
 const EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
-const EJ_RAPID_EPI_KEY_ENV = "EJ_RAPID_EPI_KEY"
-const EJ_RAPID_API_PROJECT_NAME_ENV = "EJ_RAPID_API_PROJECT_NAME"
 
 func main() {
+	panic(fmt.Errorf("%#v", fetchDict([]string{"love"})))
+
 	app := cli.NewApp()
 	app.Name = "ej"
 	app.Description = `simple Japanese <->English translator.
@@ -192,68 +192,55 @@ func main() {
 
 var noDefinitionAPIKey = errors.New("no definitiion api key")
 
-func fetchDict(words []string) ([]Dict, error) {
-
-	apiKey := os.Getenv(EJ_RAPID_EPI_KEY_ENV)
-	if apiKey == "" {
-		return nil, noDefinitionAPIKey
-	}
-
-	projectName := os.Getenv(EJ_RAPID_API_PROJECT_NAME_ENV)
-	if projectName == "" {
-		return nil, noDefinitionAPIKey
-	}
-
-	api := rapidAPISDK.RapidAPI{
-		Project: projectName,
-		Key:     apiKey,
-	}
+func fetchDict(words []string) []Dict {
 	var result []Dict
 	for _, word := range words {
-
-		for _, caller := range dictCallers {
-			callResp := dictCall(api, word, caller)
-			switch r := callResp.(type) {
-			}
+		defs := readDict(fmt.Sprintf("https://api.datamuse.com/words?sp=%s&md=d", word))
+		if len(defs) != 0 {
+			syns := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_syn=%s&md=d", word))
+			ants := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_and=%s&md=d", word))
+			result = append(result, Dict{
+				Word:       word,
+				Definition: defs[0],
+				Synonyms:   syns,
+				Antonyms:   ants,
+			})
 		}
 	}
 
-	return result, nil
+	return result
 }
+func readDict(url string) []Definition {
+	r, err := http.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer r.Body.Close()
 
-type dictCaller struct {
-	pack   string
-	block  string
-	opResp func(map[string]interface{}) interface{}
-}
-
-var dictCallers = []dictCaller{
-	{
-		pack:  "WORDS",
-		block: "",
-		opResp: func(resp map[string]interface{}) interface{} {
-			//TODO
-			panic(resp)
-		},
-	},
-}
-
-func dictCall(api rapidAPISDK.RapidAPI, word string, caller dictCaller) interface{} {
-	params := map[string]rapidAPISDK.Param{
-		"word": {
-			Type:  "string",
-			Value: word,
-		},
+	d, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return nil
 	}
 
-	return caller.opResp(api.Call(caller.pack, caller.block, params))
+	var defs []Definition
+	err = json.Unmarshal(d, &defs)
+	if err != nil {
+		panic(err)
+	}
+
+	return defs
+}
+
+type Definition struct {
+	Word string   `json:"word"`
+	Defs []string `json:"defs"`
 }
 
 type Dict struct {
-	Word        string   `json:"word"`
-	Definitions []string `json:"definitions"`
-	Synonyms    []string `json:"synonyms"`
-	Antonyms    []string `json:"anotonyms"`
+	Word       string       `json:"word"`
+	Definition Definition   `json:"definition"`
+	Synonyms   []Definition `json:"synonyms"`
+	Antonyms   []Definition `json:"antonyms"`
 }
 
 func expandFilePath(p string) string {

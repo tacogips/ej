@@ -12,18 +12,12 @@ and set it into environment variable named `EJ_GOOGLE_TRANS_API_KEY`.
 
 https://cloud.google.com/translate/docs/getting-started
 
-you can use rapid www.wordsapi.com API to show definition alongside of translation result.
-https://www.wordsapi.com/pricing
+also using datamuse api to get word definition,synonyms,antonyms
 
-wordsapi is hosted on RapidAPI.
-https://docs.rapidapi.com/v1.0/docs/basics-creating-a-project
-
+https://www.datamuse.com/api/
 
 ```
 export EJ_GOOGLE_TRANS_API_KEY="your_api_key"
-# (optional) RAPID API KEY(to use wordsapi)
-export EJ_RAPID_API_KEY="your_key"
-
 ```
 
 and ej command with original sentence
@@ -52,4 +46,3 @@ Heavy using leads you to bankruptcy.
 At your own risk and wallet.
 
 https://cloud.google.com/translate/pricing
-https://www.wordsapi.com/pricing
