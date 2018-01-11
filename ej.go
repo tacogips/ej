@@ -86,8 +86,9 @@ func main() {
 			return nil
 		}
 
+		notUseCache := c.Bool("f")
 		// search from cache
-		if !c.Bool("f") {
+		if !notUseCache {
 			t, found := fetchTranslationFromCache(cacheDB, src)
 			if found {
 				printer(t)
@@ -144,9 +145,10 @@ func main() {
 
 		var dicts []Dict
 		if destLang == language.English {
-			dicts = fetchDictOfWords(cacheDB, translated.Translated, false)
+			dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
 		} else if inputLang == language.English {
-			dicts = fetchDictOfWords(cacheDB, translated.Input, false)
+
+			dicts = fetchDictOfWords(cacheDB, translated.Input, false, notUseCache)
 		}
 
 		result := TranslateAndDicts{
@@ -185,9 +187,9 @@ func fetchCacheList(db *bolt.DB, src string) []TranslateAndDicts {
 			if err := json.Unmarshal(v, &tr); err == nil {
 				var dicts []Dict
 				if tr.IsInputIsEng() {
-					dicts = fetchDictOfWords(db, tr.Input, true)
+					dicts = fetchDictOfWords(db, tr.Input, true, false)
 				} else if tr.IsTranslatedIsEng() {
-					dicts = fetchDictOfWords(db, tr.Translated, true)
+					dicts = fetchDictOfWords(db, tr.Translated, true, false)
 				}
 				result := TranslateAndDicts{
 					Translate: tr,
@@ -221,9 +223,9 @@ func fetchTranslationFromCache(db *bolt.DB, src string) (TranslateAndDicts, bool
 		if err := json.Unmarshal(v, &tr); err == nil {
 			result.Translate = tr
 			if tr.IsInputIsEng() {
-				result.Dicts = fetchDictOfWords(db, tr.Input, true)
+				result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
 			} else if tr.IsTranslatedIsEng() {
-				result.Dicts = fetchDictOfWords(db, tr.Translated, true)
+				result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
 			}
 
 			found = true
@@ -234,7 +236,7 @@ func fetchTranslationFromCache(db *bolt.DB, src string) (TranslateAndDicts, bool
 	return result, found
 }
 
-func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool) []Dict {
+func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) []Dict {
 	var result []Dict
 
 	words := strings.Split(engSentense, " ")
@@ -243,12 +245,23 @@ func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool) []Dic
 	}
 
 	for _, word := range words {
-		if d, onCache := fetchDictFromCache(db, word); onCache {
-			result = append(result, d)
+		if word == "" {
+			continue
+		}
 
-		} else if onlyFromCache {
+		if notUseCache {
 			if d, ok := fetchDictFromAPI(word); ok {
+				putDictToCache(db, d)
 				result = append(result, d)
+			}
+		} else {
+			if d, onCache := fetchDictFromCache(db, word); onCache {
+				result = append(result, d)
+			} else if !onlyFromCache {
+				if d, ok := fetchDictFromAPI(word); ok {
+					putDictToCache(db, d)
+					result = append(result, d)
+				}
 			}
 		}
 	}
@@ -277,7 +290,7 @@ func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
 	if err != nil {
 		return d, false
 	}
-	return d, true
+	return Dict{}, false
 }
 
 func putTranslationToCache(db *bolt.DB, tr Translate) error {
@@ -312,9 +325,13 @@ func putDictToCache(db *bolt.DB, d Dict) error {
 
 func fetchDictFromAPI(word string) (Dict, bool) {
 	defs := readDict(fmt.Sprintf("https://api.datamuse.com/words?sp=%s&md=d", word))
+
 	if len(defs) != 0 {
 		syns := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_syn=%s&md=d", word))
 		ants := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_and=%s&md=d", word))
+		//TODO
+		//panic(defs)
+
 		return Dict{
 			Word:       word,
 			Definition: defs[0],
@@ -322,6 +339,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 			Antonyms:   ants,
 		}, true
 	}
+
 	return Dict{}, false
 }
 
@@ -398,7 +416,6 @@ func expandFilePath(p string) string {
 		}
 		return absp
 	}
-
 }
 
 type TranslateAndDicts struct {
