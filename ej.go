@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -27,7 +28,11 @@ const (
 	BOLT_DICT_BUCKET      = "dict_cache"
 
 	MAX_FETCH_DICT_WORD_NUM_AT_ONE = 4
+
+	MAX_FETCH_DEF_NUM = 3
 )
+
+var dictDefSanitizer = regexp.MustCompile("[a-z]\t")
 
 func main() {
 	app := cli.NewApp()
@@ -147,7 +152,6 @@ func main() {
 		if destLang == language.English {
 			dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
 		} else if inputLang == language.English {
-
 			dicts = fetchDictOfWords(cacheDB, translated.Input, false, notUseCache)
 		}
 
@@ -265,9 +269,7 @@ func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUs
 			}
 		}
 	}
-
-	//TODO
-	return nil
+	return result
 }
 
 func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
@@ -324,13 +326,12 @@ func putDictToCache(db *bolt.DB, d Dict) error {
 }
 
 func fetchDictFromAPI(word string) (Dict, bool) {
-	defs := readDict(fmt.Sprintf("https://api.datamuse.com/words?sp=%s&md=d", word))
+	baseURL := "https://api.datamuse.com/words"
+	defs := readDef(fmt.Sprintf(baseURL+"?sp=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
 	if len(defs) != 0 {
-		syns := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_syn=%s&md=d", word))
-		ants := readDict(fmt.Sprintf("https://api.datamuse.com/words?rel_and=%s&md=d", word))
-		//TODO
-		//panic(defs)
+		syns := readDef(fmt.Sprintf(baseURL+"?rel_syn=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
+		ants := readDef(fmt.Sprintf(baseURL+"?rel_and=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
 		return Dict{
 			Word:       word,
@@ -343,7 +344,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 	return Dict{}, false
 }
 
-func readDict(url string) []Definition {
+func readDef(url string) []Definition {
 	r, err := http.Get(url)
 	if err != nil {
 		return nil
@@ -359,6 +360,20 @@ func readDict(url string) []Definition {
 	err = json.Unmarshal(d, &defs)
 	if err != nil {
 		panic(err)
+	}
+
+	if len(defs) > MAX_FETCH_DEF_NUM {
+		defs = defs[:MAX_FETCH_DEF_NUM]
+	}
+
+	for i, def := range defs {
+		if len(def.Defs) > MAX_FETCH_DEF_NUM {
+			def.Defs = def.Defs[:MAX_FETCH_DEF_NUM]
+		}
+		for di, d := range def.Defs {
+			def.Defs[di] = dictDefSanitizer.ReplaceAllString(d, "")
+		}
+		defs[i] = def
 	}
 
 	return defs
@@ -453,9 +468,9 @@ func plainPrinterDefinition(prefix string, def Definition) {
 		Defs []string `json:"defs"`
 	}
 
-	fmt.Fprintf(os.Stdout, "%s%s\n", prefix, def.Word)
+	fmt.Fprintf(os.Stdout, "%s< %s >\n", prefix, def.Word)
 	for _, txt := range def.Defs {
-		fmt.Fprintf(os.Stdout, "%s <def> %s\n", prefix, txt)
+		fmt.Fprintf(os.Stdout, "%s (def) %s\n", prefix, txt)
 	}
 }
 
@@ -470,14 +485,14 @@ func plainPrinter(tr TranslateAndDicts) {
 			Antonyms   []Definition `json:"antonyms"`
 		}
 
-		plainPrinterDefinition("<word> ", d.Definition)
+		plainPrinterDefinition("[word] ", d.Definition)
 
 		for _, syn := range d.Synonyms {
-			plainPrinterDefinition("  <syn> ", syn)
+			plainPrinterDefinition("  [syn] ", syn)
 		}
 
 		for _, ant := range d.Antonyms {
-			plainPrinterDefinition("  <ant> ", ant)
+			plainPrinterDefinition("  [ant] ", ant)
 		}
 	}
 }
