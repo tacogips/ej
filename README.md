@@ -36,7 +36,7 @@ i am a man
 Sumo exclamation
 
 # show all caches json
-> ej -c -json
+> ej -l -json
 [{"input":"脆弱a","translated":"Vulnerable"},{"input":"脆弱性","translated":"Vulnerability"}]
 ```
 
