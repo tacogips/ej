@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -18,6 +22,18 @@ import (
 	"google.golang.org/api/option"
 )
 
+const EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
+const (
+	BOLT_TRANSLATE_BUCKET = "trans_cache"
+	BOLT_DICT_BUCKET      = "dict_cache"
+
+	MAX_FETCH_DICT_WORD_NUM_AT_ONE = 4
+
+	MAX_FETCH_DEF_NUM = 3
+)
+
+var dictDefSanitizer = regexp.MustCompile("[a-z]\t")
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "ej"
@@ -26,11 +42,15 @@ func main() {
 
 	app.Usage = "ej [sentense]"
 	app.Commands = nil
-	app.Version = "0.0.2"
+	app.Version = "0.0.3"
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
-			Name:  "c",
+			Name:  "l",
 			Usage: "list all caches",
+		},
+		cli.BoolFlag{
+			Name:  "nd",
+			Usage: "no dictionry",
 		},
 		cli.BoolFlag{
 			Name:  "f",
@@ -48,8 +68,10 @@ func main() {
 
 	app.Action = func(c *cli.Context) error {
 
-		var printer func(tr Translate)
-		var slicePrinter func(tr []Translate)
+		var printer func(tr TranslateAndDicts)
+		var slicePrinter func(tr []TranslateAndDicts)
+
+		// set printer
 		if c.Bool("json") {
 			printer = jsonPrinter
 			slicePrinter = jsonSlicePrinter
@@ -58,73 +80,36 @@ func main() {
 			slicePrinter = plainSlicePrinter
 		}
 
-		dbDir := expandFilePath("$HOME/.ej")
-		if _, err := os.Stat(dbDir); os.IsNotExist(err) {
-			err := os.MkdirAll(dbDir, 0755)
-			if err != nil {
-				return err
-			}
-		}
-
-		db, err := bolt.Open(filepath.Join(dbDir, "ej.db"), 0755, nil)
+		cacheDB, err := loadCacheDB()
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer cacheDB.Close()
 
-		if c.Bool("c") {
-			var cachedResults []Translate
-			err = db.View(func(tx *bolt.Tx) error {
-				bucket := tx.Bucket([]byte("cache"))
-				err := bucket.ForEach(func(k, v []byte) error {
-					cachedResults = append(cachedResults,
-						newTranslate(string(k), string(v)))
-					return nil
-				})
-				if err != nil {
-					return err
-				}
-
-				slicePrinter(cachedResults)
-				return nil
-			})
-			return err
+		noDict := c.Bool("nd")
+		if c.Bool("l") { // list cached
+			slicePrinter(fetchCacheList(cacheDB, noDict))
+			return nil
 		}
 
 		src := strings.Join(c.Args(), " ")
 		if len(src) == 0 {
 			return nil
 		}
-		apiKey := os.Getenv("EJ_API_KEY")
-		if apiKey == "" {
-			return fmt.Errorf("need 'EJ_API_KEY' env variable")
+
+		notUseCache := c.Bool("f")
+		// search from cache
+		if !notUseCache {
+			t, found := fetchTranslationFromCache(cacheDB, src, noDict)
+			if found {
+				printer(t)
+				return nil
+			}
 		}
 
-		// search from cache
-		if !c.Bool("f") {
-			// get from cache if exists
-			var result string
-			err = db.View(func(tx *bolt.Tx) error {
-				bucket := tx.Bucket([]byte("cache"))
-				if bucket == nil {
-					return nil
-				}
-				val := bucket.Get([]byte(src))
-				if len(val) == 0 {
-					return nil
-				}
-				result = string(val)
-				return nil
-			})
-
-			if err != nil {
-				return err
-			}
-			if result != "" {
-				cachedResult := newTranslate(src, result)
-				printer(cachedResult)
-				return nil
-			}
+		apiKey := os.Getenv(EJ_GOOGLE_TRANS_API_KEY_ENV)
+		if apiKey == "" {
+			return fmt.Errorf("need '%s' env variable", EJ_GOOGLE_TRANS_API_KEY_ENV)
 		}
 
 		ctx := context.Background()
@@ -133,6 +118,7 @@ func main() {
 			return err
 		}
 
+		// default , somelang to japanese
 		destLang := language.Japanese
 		input := []string{src}
 
@@ -161,26 +147,250 @@ func main() {
 			return err
 		}
 
-		result := newTranslate(src, resp[0].Text)
-		printer(result)
-
-		err = db.Update(func(tx *bolt.Tx) error {
-			bucket, err := tx.CreateBucketIfNotExists([]byte("cache"))
-			if err != nil {
-				return err
-			}
-			err = bucket.Put([]byte(result.Input), []byte(result.Translated))
-
-			return err
-		})
+		inputLang := resp[0].Source
+		translated := newTranslate(inputLang, src, destLang, resp[0].Text)
+		err = putTranslationToCache(cacheDB, translated)
 		if err != nil {
 			return err
 		}
 
+		var dicts []Dict
+		if !noDict {
+			if destLang == language.English {
+				dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
+			} else if inputLang == language.English {
+				dicts = fetchDictOfWords(cacheDB, translated.Input, false, notUseCache)
+			}
+		}
+
+		result := TranslateAndDicts{
+			Translate: translated,
+			Dicts:     dicts,
+		}
+
+		printer(result)
 		return nil
 	}
 
 	app.Run(os.Args)
+}
+
+var noDefinitionAPIKey = errors.New("no definitiion api key")
+
+func loadCacheDB() (*bolt.DB, error) {
+	dbDir := expandFilePath("$HOME/.ej")
+	if _, err := os.Stat(dbDir); os.IsNotExist(err) {
+		err := os.MkdirAll(dbDir, 0755)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	db, err := bolt.Open(filepath.Join(dbDir, "ej.db"), 0755, nil)
+	return db, err
+}
+
+func fetchCacheList(db *bolt.DB, noDict bool) []TranslateAndDicts {
+	var cachedResults []TranslateAndDicts
+	db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BOLT_TRANSLATE_BUCKET))
+		bucket.ForEach(func(k, v []byte) error {
+			if c, ok := fetchTranslationFromCache(db, string(k), noDict); ok {
+				cachedResults = append(cachedResults, c)
+			}
+			return nil
+		})
+
+		return nil
+	})
+	return cachedResults
+}
+
+func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateAndDicts, bool) {
+	// get from cache if exists
+	result := TranslateAndDicts{}
+	found := false
+	db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BOLT_TRANSLATE_BUCKET))
+		if bucket == nil {
+			return nil
+		}
+		v := bucket.Get([]byte(src))
+		if len(v) == 0 {
+			return nil
+		}
+
+		var tr Translate
+		if err := json.Unmarshal(v, &tr); err == nil {
+			result.Translate = tr
+			if !noDict {
+				if tr.IsInputIsEng() {
+					result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
+				} else if tr.IsTranslatedIsEng() {
+					result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
+				}
+			}
+
+			found = true
+		}
+		return nil
+	})
+
+	return result, found
+}
+
+func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) []Dict {
+	var result []Dict
+
+	words := strings.Split(engSentense, " ")
+	if len(words) > MAX_FETCH_DICT_WORD_NUM_AT_ONE {
+		words = words[:MAX_FETCH_DICT_WORD_NUM_AT_ONE]
+	}
+
+	for _, word := range words {
+		if word == "" {
+			continue
+		}
+
+		if notUseCache {
+			if d, ok := fetchDictFromAPI(word); ok {
+				putDictToCache(db, d)
+				result = append(result, d)
+			}
+		} else {
+			if d, onCache := fetchDictFromCache(db, word); onCache {
+				result = append(result, d)
+			} else if !onlyFromCache {
+				if d, ok := fetchDictFromAPI(word); ok {
+					putDictToCache(db, d)
+					result = append(result, d)
+				}
+			}
+		}
+	}
+	return result
+}
+
+func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
+	var d Dict
+	err := db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BOLT_DICT_BUCKET))
+		if bucket == nil {
+			return nil
+		}
+
+		val := bucket.Get([]byte(word))
+		if len(val) == 0 {
+			return errors.New("not found")
+		}
+
+		err := json.Unmarshal(val, &d)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err == nil {
+		return d, true
+	}
+	return Dict{}, false
+}
+
+func putTranslationToCache(db *bolt.DB, tr Translate) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(BOLT_TRANSLATE_BUCKET))
+		if err != nil {
+			return err
+		}
+		d, err := json.Marshal(tr)
+		if err != nil {
+			return err
+		}
+		err = bucket.Put([]byte(tr.Input), d)
+		return err
+	})
+}
+
+func putDictToCache(db *bolt.DB, d Dict) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(BOLT_DICT_BUCKET))
+		if err != nil {
+			return err
+		}
+		mashalled, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		err = bucket.Put([]byte(d.Word), mashalled)
+		return err
+	})
+}
+
+func fetchDictFromAPI(word string) (Dict, bool) {
+	baseURL := "https://api.datamuse.com/words"
+	defs := readDef(fmt.Sprintf(baseURL+"?sp=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
+
+	if len(defs) != 0 && len(defs[0].Defs) != 0 {
+		syns := readDef(fmt.Sprintf(baseURL+"?rel_syn=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
+		ants := readDef(fmt.Sprintf(baseURL+"?rel_ant=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
+
+		return Dict{
+			Word:       word,
+			Definition: defs[0],
+			Synonyms:   syns,
+			Antonyms:   ants,
+		}, true
+	}
+
+	return Dict{}, false
+}
+
+func readDef(url string) []Definition {
+	r, err := http.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer r.Body.Close()
+
+	d, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return nil
+	}
+
+	var defs []Definition
+	err = json.Unmarshal(d, &defs)
+	if err != nil {
+		panic(err)
+	}
+
+	if len(defs) > MAX_FETCH_DEF_NUM {
+		defs = defs[:MAX_FETCH_DEF_NUM]
+	}
+
+	for i, def := range defs {
+		if len(def.Defs) > MAX_FETCH_DEF_NUM {
+			def.Defs = def.Defs[:MAX_FETCH_DEF_NUM]
+		}
+		for di, d := range def.Defs {
+			def.Defs[di] = dictDefSanitizer.ReplaceAllString(d, "")
+		}
+		defs[i] = def
+	}
+
+	return defs
+}
+
+type Dict struct {
+	Word       string       `json:"word"`
+	Definition Definition   `json:"definition"`
+	Synonyms   []Definition `json:"synonyms"`
+	Antonyms   []Definition `json:"antonyms"`
+}
+
+type Definition struct {
+	Word string   `json:"word"`
+	Defs []string `json:"defs"`
 }
 
 func expandFilePath(p string) string {
@@ -223,38 +433,85 @@ func expandFilePath(p string) string {
 		}
 		return absp
 	}
+}
 
+type TranslateAndDicts struct {
+	Translate Translate `json:"translate"`
+	Dicts     []Dict    `json:"dicts"`
 }
 
 type Translate struct {
-	Input      string `json:"input"`
-	Translated string `json:"translated"`
+	Input          string `json:"input"`
+	InputLang      string `json:"input_lang"`
+	Translated     string `json:"translated"`
+	TranslatedLang string `json:"translated_lang"`
 }
 
-func newTranslate(input string, translated string) Translate {
+func (tr Translate) IsInputIsEng() bool {
+	return tr.InputLang == language.English.String()
+}
+
+func (tr Translate) IsTranslatedIsEng() bool {
+	return tr.TranslatedLang == language.English.String()
+}
+
+func newTranslate(inputLang language.Tag, input string, translatedLang language.Tag, translated string) Translate {
 	return Translate{
-		Input:      html.UnescapeString(input),
-		Translated: html.UnescapeString(translated),
+		Input:          html.UnescapeString(input),
+		InputLang:      inputLang.String(),
+		Translated:     html.UnescapeString(translated),
+		TranslatedLang: translatedLang.String(),
 	}
 }
 
-func plainPrinter(tr Translate) {
-	fmt.Fprintf(os.Stdout, "%s\n%s\n\n", tr.Input, tr.Translated)
+func plainPrinterDefinition(prefix string, def Definition) {
+	type Definition struct {
+		Word string   `json:"word"`
+		Defs []string `json:"defs"`
+	}
+
+	fmt.Fprintf(os.Stdout, "%s<%s>\n", prefix, def.Word)
+	for _, txt := range def.Defs {
+		fmt.Fprintf(os.Stdout, "%s   (def) %s\n", prefix, txt)
+	}
+	fmt.Fprint(os.Stdout, "\n")
 }
 
-func plainSlicePrinter(tr []Translate) {
+func plainPrinter(tr TranslateAndDicts) {
+	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
+	for _, d := range tr.Dicts {
+
+		type Dict struct {
+			Word       string       `json:"word"`
+			Definition Definition   `json:"definition"`
+			Synonyms   []Definition `json:"synonyms"`
+			Antonyms   []Definition `json:"antonyms"`
+		}
+
+		plainPrinterDefinition("  [word] ", d.Definition)
+		for _, syn := range d.Synonyms {
+			plainPrinterDefinition("    [syn] ", syn)
+		}
+
+		for _, ant := range d.Antonyms {
+			plainPrinterDefinition("    [ant] ", ant)
+		}
+	}
+}
+
+func plainSlicePrinter(tr []TranslateAndDicts) {
 	for _, each := range tr {
 		plainPrinter(each)
 	}
 }
-func jsonPrinter(tr Translate) {
+func jsonPrinter(tr TranslateAndDicts) {
 	j, err := json.Marshal(tr)
 	if err == nil {
 		fmt.Fprintf(os.Stdout, "%s\n", string(j))
 	}
 }
 
-func jsonSlicePrinter(tr []Translate) {
+func jsonSlicePrinter(tr []TranslateAndDicts) {
 	j, err := json.Marshal(tr)
 	if err == nil {
 		fmt.Fprintf(os.Stdout, "%s\n", string(j))
