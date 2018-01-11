@@ -346,16 +346,16 @@ func readDict(url string) []Definition {
 	return defs
 }
 
-type Definition struct {
-	Word string   `json:"word"`
-	Defs []string `json:"defs"`
-}
-
 type Dict struct {
 	Word       string       `json:"word"`
 	Definition Definition   `json:"definition"`
 	Synonyms   []Definition `json:"synonyms"`
 	Antonyms   []Definition `json:"antonyms"`
+}
+
+type Definition struct {
+	Word string   `json:"word"`
+	Defs []string `json:"defs"`
 }
 
 func expandFilePath(p string) string {
@@ -430,9 +430,39 @@ func newTranslate(inputLang language.Tag, input string, translatedLang language.
 	}
 }
 
+func plainPrinterDefinition(prefix string, def Definition) {
+	type Definition struct {
+		Word string   `json:"word"`
+		Defs []string `json:"defs"`
+	}
+
+	fmt.Fprintf(os.Stdout, "%s%s\n", prefix, def.Word)
+	for _, txt := range def.Defs {
+		fmt.Fprintf(os.Stdout, "%s <def> %s\n", prefix, txt)
+	}
+}
+
 func plainPrinter(tr TranslateAndDicts) {
-	//TODO
-	//fmt.Fprintf(os.Stdout, "%s\n%s\n\n", tr.Input, tr.Translated)
+	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
+	for _, d := range tr.Dicts {
+
+		type Dict struct {
+			Word       string       `json:"word"`
+			Definition Definition   `json:"definition"`
+			Synonyms   []Definition `json:"synonyms"`
+			Antonyms   []Definition `json:"antonyms"`
+		}
+
+		plainPrinterDefinition("<word> ", d.Definition)
+
+		for _, syn := range d.Synonyms {
+			plainPrinterDefinition("  <syn> ", syn)
+		}
+
+		for _, ant := range d.Antonyms {
+			plainPrinterDefinition("  <ant> ", ant)
+		}
+	}
 }
 
 func plainSlicePrinter(tr []TranslateAndDicts) {
