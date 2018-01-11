@@ -49,6 +49,10 @@ func main() {
 			Usage: "list all caches",
 		},
 		cli.BoolFlag{
+			Name:  "nd",
+			Usage: "no dictionry",
+		},
+		cli.BoolFlag{
 			Name:  "f",
 			Usage: "force translate. not use cache",
 		},
@@ -63,10 +67,6 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		src := strings.Join(c.Args(), " ")
-		if len(src) == 0 {
-			return nil
-		}
 
 		var printer func(tr TranslateAndDicts)
 		var slicePrinter func(tr []TranslateAndDicts)
@@ -86,15 +86,21 @@ func main() {
 		}
 		defer cacheDB.Close()
 
+		noDict := c.Bool("nd")
 		if c.Bool("l") { // list cached
-			slicePrinter(fetchCacheList(cacheDB, src))
+			slicePrinter(fetchCacheList(cacheDB, noDict))
+			return nil
+		}
+
+		src := strings.Join(c.Args(), " ")
+		if len(src) == 0 {
 			return nil
 		}
 
 		notUseCache := c.Bool("f")
 		// search from cache
 		if !notUseCache {
-			t, found := fetchTranslationFromCache(cacheDB, src)
+			t, found := fetchTranslationFromCache(cacheDB, src, noDict)
 			if found {
 				printer(t)
 				return nil
@@ -149,10 +155,12 @@ func main() {
 		}
 
 		var dicts []Dict
-		if destLang == language.English {
-			dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
-		} else if inputLang == language.English {
-			dicts = fetchDictOfWords(cacheDB, translated.Input, false, notUseCache)
+		if !noDict {
+			if destLang == language.English {
+				dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
+			} else if inputLang == language.English {
+				dicts = fetchDictOfWords(cacheDB, translated.Input, false, notUseCache)
+			}
 		}
 
 		result := TranslateAndDicts{
@@ -182,24 +190,13 @@ func loadCacheDB() (*bolt.DB, error) {
 	return db, err
 }
 
-func fetchCacheList(db *bolt.DB, src string) []TranslateAndDicts {
+func fetchCacheList(db *bolt.DB, noDict bool) []TranslateAndDicts {
 	var cachedResults []TranslateAndDicts
 	db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(BOLT_TRANSLATE_BUCKET))
 		bucket.ForEach(func(k, v []byte) error {
-			var tr Translate
-			if err := json.Unmarshal(v, &tr); err == nil {
-				var dicts []Dict
-				if tr.IsInputIsEng() {
-					dicts = fetchDictOfWords(db, tr.Input, true, false)
-				} else if tr.IsTranslatedIsEng() {
-					dicts = fetchDictOfWords(db, tr.Translated, true, false)
-				}
-				result := TranslateAndDicts{
-					Translate: tr,
-					Dicts:     dicts,
-				}
-				cachedResults = append(cachedResults, result)
+			if c, ok := fetchTranslationFromCache(db, string(k), noDict); ok {
+				cachedResults = append(cachedResults, c)
 			}
 			return nil
 		})
@@ -209,7 +206,7 @@ func fetchCacheList(db *bolt.DB, src string) []TranslateAndDicts {
 	return cachedResults
 }
 
-func fetchTranslationFromCache(db *bolt.DB, src string) (TranslateAndDicts, bool) {
+func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateAndDicts, bool) {
 	// get from cache if exists
 	result := TranslateAndDicts{}
 	found := false
@@ -226,11 +223,12 @@ func fetchTranslationFromCache(db *bolt.DB, src string) (TranslateAndDicts, bool
 		var tr Translate
 		if err := json.Unmarshal(v, &tr); err == nil {
 			result.Translate = tr
-			if tr.IsInputIsEng() {
-				panic(111)
-				result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
-			} else if tr.IsTranslatedIsEng() {
-				result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
+			if !noDict {
+				if tr.IsInputIsEng() {
+					result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
+				} else if tr.IsTranslatedIsEng() {
+					result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
+				}
 			}
 
 			found = true
@@ -280,18 +278,21 @@ func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
 		if bucket == nil {
 			return nil
 		}
+
 		val := bucket.Get([]byte(word))
 		if len(val) == 0 {
 			return nil
 		}
+
 		err := json.Unmarshal(val, &d)
 		if err != nil {
 			return err
 		}
 		return nil
 	})
-	if err != nil {
-		return d, false
+
+	if err == nil {
+		return d, true
 	}
 	return Dict{}, false
 }
@@ -469,10 +470,11 @@ func plainPrinterDefinition(prefix string, def Definition) {
 		Defs []string `json:"defs"`
 	}
 
-	fmt.Fprintf(os.Stdout, "%s< %s >\n", prefix, def.Word)
+	fmt.Fprintf(os.Stdout, "%s<%s>\n", prefix, def.Word)
 	for _, txt := range def.Defs {
-		fmt.Fprintf(os.Stdout, "%s (def) %s\n", prefix, txt)
+		fmt.Fprintf(os.Stdout, "%s   (def) %s\n", prefix, txt)
 	}
+	fmt.Fprint(os.Stdout, "\n")
 }
 
 func plainPrinter(tr TranslateAndDicts) {
@@ -486,14 +488,13 @@ func plainPrinter(tr TranslateAndDicts) {
 			Antonyms   []Definition `json:"antonyms"`
 		}
 
-		plainPrinterDefinition("[word] ", d.Definition)
-
+		plainPrinterDefinition("  [word] ", d.Definition)
 		for _, syn := range d.Synonyms {
-			plainPrinterDefinition("  [syn] ", syn)
+			plainPrinterDefinition("    [syn] ", syn)
 		}
 
 		for _, ant := range d.Antonyms {
-			plainPrinterDefinition("  [ant] ", ant)
+			plainPrinterDefinition("    [ant] ", ant)
 		}
 	}
 }
