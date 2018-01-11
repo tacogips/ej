@@ -281,7 +281,7 @@ func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
 
 		val := bucket.Get([]byte(word))
 		if len(val) == 0 {
-			return nil
+			return errors.New("not found")
 		}
 
 		err := json.Unmarshal(val, &d)
@@ -331,7 +331,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 	baseURL := "https://api.datamuse.com/words"
 	defs := readDef(fmt.Sprintf(baseURL+"?sp=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
-	if len(defs) != 0 {
+	if len(defs) != 0 && len(defs[0].Defs) != 0 {
 		syns := readDef(fmt.Sprintf(baseURL+"?rel_syn=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 		ants := readDef(fmt.Sprintf(baseURL+"?rel_ant=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
