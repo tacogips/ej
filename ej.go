@@ -333,7 +333,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 
 	if len(defs) != 0 {
 		syns := readDef(fmt.Sprintf(baseURL+"?rel_syn=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
-		ants := readDef(fmt.Sprintf(baseURL+"?rel_and=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
+		ants := readDef(fmt.Sprintf(baseURL+"?rel_ant=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
 		return Dict{
 			Word:       word,
