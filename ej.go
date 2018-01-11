@@ -227,6 +227,7 @@ func fetchTranslationFromCache(db *bolt.DB, src string) (TranslateAndDicts, bool
 		if err := json.Unmarshal(v, &tr); err == nil {
 			result.Translate = tr
 			if tr.IsInputIsEng() {
+				panic(111)
 				result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
 			} else if tr.IsTranslatedIsEng() {
 				result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
