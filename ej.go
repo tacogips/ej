@@ -32,7 +32,7 @@ const (
 	MAX_FETCH_DEF_NUM = 3
 )
 
-var dictDefSanitizer = regexp.MustCompile("[a-z]\t")
+var dictDefSanitizer = regexp.MustCompile("\t")
 
 func main() {
 	app := cli.NewApp()
@@ -42,7 +42,7 @@ func main() {
 
 	app.Usage = "ej [sentense]"
 	app.Commands = nil
-	app.Version = "0.0.3"
+	app.Version = "0.0.4"
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
 			Name:  "l",
@@ -373,7 +373,7 @@ func readDef(url string) []Definition {
 			def.Defs = def.Defs[:MAX_FETCH_DEF_NUM]
 		}
 		for di, d := range def.Defs {
-			def.Defs[di] = dictDefSanitizer.ReplaceAllString(d, "")
+			def.Defs[di] = dictDefSanitizer.ReplaceAllString(d, " ")
 		}
 		defs[i] = def
 	}
