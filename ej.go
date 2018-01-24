@@ -24,8 +24,9 @@ import (
 
 const EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
 const (
-	BOLT_TRANSLATE_BUCKET = "trans_cache"
-	BOLT_DICT_BUCKET      = "dict_cache"
+	BOLT_TRANSLATE_BUCKET  = "trans_cache"
+	BOLT_DICT_BUCKET       = "dict_cache"
+	BOLT_URBAN_DICT_BUCKET = "urban_dict_cache"
 
 	MAX_FETCH_DICT_WORD_NUM_AT_ONE = 4
 
@@ -154,6 +155,15 @@ func main() {
 			return err
 		}
 
+		var urbanDict UrbanDict
+		if !noDict {
+			if destLang == language.English {
+				urbanDict = fetchUrbanDict(cacheDB, translated.Translated, false, notUseCache)
+			} else if inputLang == language.English {
+				urbanDict = fetchUrbanDict(cacheDB, translated.Input, false, notUseCache)
+			}
+		}
+
 		var dicts []WordDict
 		if !noDict {
 			if destLang == language.English {
@@ -165,6 +175,7 @@ func main() {
 
 		result := TranslateAndDicts{
 			Translate: translated,
+			UrbanDict: urbanDict,
 			WordDicts: dicts,
 		}
 
@@ -239,6 +250,51 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 	return result, found
 }
 
+func fetchUrbanDict(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) UrbanDict {
+
+	var fetchFromUrban = func(engSentense string) (UrbanDict, bool) {
+		url := fmt.Sprintf("http://api.urbandictionary.com/v0/define?term=?sp=%s", engSentense)
+
+		r, err := http.Get(url)
+		if err != nil {
+			return UrbanDict{}, false
+		}
+		defer r.Body.Close()
+
+		d, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return UrbanDict{}, false
+		}
+
+		var dict UrbanDict
+		err = json.Unmarshal(d, &dict)
+		if err != nil {
+			panic(err)
+		}
+
+		dict.Input = engSentense
+		return dict, true
+	}
+
+	if notUseCache {
+		if d, ok := fetchFromUrban(engSentense); ok {
+			putUrbanDictToCache(db, d)
+			return d
+		}
+
+	} else {
+		if d, onCache := fetchUrbanDictFromCache(db, engSentense); onCache {
+			return d
+		} else if !onlyFromCache {
+			if d, ok := fetchFromUrban(engSentense); ok {
+				putUrbanDictToCache(db, d)
+				return d
+			}
+		}
+	}
+	return UrbanDict{}
+}
+
 func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) []WordDict {
 	var result []WordDict
 
@@ -269,6 +325,32 @@ func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUs
 		}
 	}
 	return result
+}
+
+func fetchUrbanDictFromCache(db *bolt.DB, input string) (UrbanDict, bool) {
+	var d UrbanDict
+	err := db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BOLT_URBAN_DICT_BUCKET))
+		if bucket == nil {
+			return nil
+		}
+
+		val := bucket.Get([]byte(input))
+		if len(val) == 0 {
+			return errors.New("not found")
+		}
+
+		err := json.Unmarshal(val, &d)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err == nil {
+		return d, true
+	}
+	return UrbanDict{}, false
 }
 
 func fetchDictFromCache(db *bolt.DB, word string) (WordDict, bool) {
@@ -308,6 +390,21 @@ func putTranslationToCache(db *bolt.DB, tr Translate) error {
 			return err
 		}
 		err = bucket.Put([]byte(tr.Input), d)
+		return err
+	})
+}
+
+func putUrbanDictToCache(db *bolt.DB, d UrbanDict) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(BOLT_URBAN_DICT_BUCKET))
+		if err != nil {
+			return err
+		}
+		mashalled, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		err = bucket.Put([]byte(d.Input), mashalled)
 		return err
 	})
 }
@@ -383,11 +480,18 @@ func readDef(url string) []Definition {
 	return defs
 }
 
-//type UrbanDict struct {
-//	Word       string     `json:"word"`
-//	Definition Definition `json:"definition"`
-//	Example    string     `json:"example"`
-//}
+type UrbanDict struct {
+	Input         string         `json:"input"`
+	Tags          []string       `json:"tags"`
+	UrbanDictList []UrbanDictDef `json:"list"`
+}
+
+type UrbanDictDef struct {
+	Word       string `json:"word"`
+	Definition string `json:"definition"`
+	Example    string `json:"example"`
+}
+
 type WordDict struct {
 	Word       string       `json:"word"`
 	Definition Definition   `json:"definition"`
@@ -444,6 +548,7 @@ func expandFilePath(p string) string {
 
 type TranslateAndDicts struct {
 	Translate Translate  `json:"translate"`
+	UrbanDict UrbanDict  `json:"urban_dict"`
 	WordDicts []WordDict `json:"dicts"`
 }
 
@@ -486,6 +591,16 @@ func plainPrinterDefinition(prefix string, def Definition) {
 
 func plainPrinter(tr TranslateAndDicts) {
 	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
+
+	// show urban
+	fmt.Fprintf(os.Stdout, "urban tags %s \n", strings.Join(tr.UrbanDict.Tags, ","))
+
+	for _, urban := range tr.UrbanDict.UrbanDictList {
+		fmt.Fprintf(os.Stdout, " word:%s \n", urban.Word)
+		fmt.Fprintf(os.Stdout, " def: %s \n", urban.Definition)
+		fmt.Fprintf(os.Stdout, " e.g: %s \n", urban.Example)
+	}
+
 	for _, d := range tr.WordDicts {
 
 		plainPrinterDefinition("  [word] ", d.Definition)
