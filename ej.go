@@ -154,7 +154,7 @@ func main() {
 			return err
 		}
 
-		var dicts []Dict
+		var dicts []WordDict
 		if !noDict {
 			if destLang == language.English {
 				dicts = fetchDictOfWords(cacheDB, translated.Translated, false, notUseCache)
@@ -165,7 +165,7 @@ func main() {
 
 		result := TranslateAndDicts{
 			Translate: translated,
-			Dicts:     dicts,
+			WordDicts: dicts,
 		}
 
 		printer(result)
@@ -225,9 +225,9 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 			result.Translate = tr
 			if !noDict {
 				if tr.IsInputIsEng() {
-					result.Dicts = fetchDictOfWords(db, tr.Input, true, false)
+					result.WordDicts = fetchDictOfWords(db, tr.Input, true, false)
 				} else if tr.IsTranslatedIsEng() {
-					result.Dicts = fetchDictOfWords(db, tr.Translated, true, false)
+					result.WordDicts = fetchDictOfWords(db, tr.Translated, true, false)
 				}
 			}
 
@@ -239,8 +239,8 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 	return result, found
 }
 
-func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) []Dict {
-	var result []Dict
+func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) []WordDict {
+	var result []WordDict
 
 	words := strings.Split(engSentense, " ")
 	if len(words) > MAX_FETCH_DICT_WORD_NUM_AT_ONE {
@@ -271,8 +271,8 @@ func fetchDictOfWords(db *bolt.DB, engSentense string, onlyFromCache bool, notUs
 	return result
 }
 
-func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
-	var d Dict
+func fetchDictFromCache(db *bolt.DB, word string) (WordDict, bool) {
+	var d WordDict
 	err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(BOLT_DICT_BUCKET))
 		if bucket == nil {
@@ -294,7 +294,7 @@ func fetchDictFromCache(db *bolt.DB, word string) (Dict, bool) {
 	if err == nil {
 		return d, true
 	}
-	return Dict{}, false
+	return WordDict{}, false
 }
 
 func putTranslationToCache(db *bolt.DB, tr Translate) error {
@@ -312,7 +312,7 @@ func putTranslationToCache(db *bolt.DB, tr Translate) error {
 	})
 }
 
-func putDictToCache(db *bolt.DB, d Dict) error {
+func putDictToCache(db *bolt.DB, d WordDict) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte(BOLT_DICT_BUCKET))
 		if err != nil {
@@ -327,7 +327,7 @@ func putDictToCache(db *bolt.DB, d Dict) error {
 	})
 }
 
-func fetchDictFromAPI(word string) (Dict, bool) {
+func fetchDictFromAPI(word string) (WordDict, bool) {
 	baseURL := "https://api.datamuse.com/words"
 	defs := readDef(fmt.Sprintf(baseURL+"?sp=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
@@ -335,7 +335,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 		syns := readDef(fmt.Sprintf(baseURL+"?rel_syn=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 		ants := readDef(fmt.Sprintf(baseURL+"?rel_ant=%s&md=d&max=%d", word, MAX_FETCH_DEF_NUM))
 
-		return Dict{
+		return WordDict{
 			Word:       word,
 			Definition: defs[0],
 			Synonyms:   syns,
@@ -343,7 +343,7 @@ func fetchDictFromAPI(word string) (Dict, bool) {
 		}, true
 	}
 
-	return Dict{}, false
+	return WordDict{}, false
 }
 
 func readDef(url string) []Definition {
@@ -369,9 +369,11 @@ func readDef(url string) []Definition {
 	}
 
 	for i, def := range defs {
+
 		if len(def.Defs) > MAX_FETCH_DEF_NUM {
 			def.Defs = def.Defs[:MAX_FETCH_DEF_NUM]
 		}
+
 		for di, d := range def.Defs {
 			def.Defs[di] = dictDefSanitizer.ReplaceAllString(d, " ")
 		}
@@ -381,7 +383,12 @@ func readDef(url string) []Definition {
 	return defs
 }
 
-type Dict struct {
+//type UrbanDict struct {
+//	Word       string     `json:"word"`
+//	Definition Definition `json:"definition"`
+//	Example    string     `json:"example"`
+//}
+type WordDict struct {
 	Word       string       `json:"word"`
 	Definition Definition   `json:"definition"`
 	Synonyms   []Definition `json:"synonyms"`
@@ -436,8 +443,8 @@ func expandFilePath(p string) string {
 }
 
 type TranslateAndDicts struct {
-	Translate Translate `json:"translate"`
-	Dicts     []Dict    `json:"dicts"`
+	Translate Translate  `json:"translate"`
+	WordDicts []WordDict `json:"dicts"`
 }
 
 type Translate struct {
@@ -479,14 +486,7 @@ func plainPrinterDefinition(prefix string, def Definition) {
 
 func plainPrinter(tr TranslateAndDicts) {
 	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
-	for _, d := range tr.Dicts {
-
-		type Dict struct {
-			Word       string       `json:"word"`
-			Definition Definition   `json:"definition"`
-			Synonyms   []Definition `json:"synonyms"`
-			Antonyms   []Definition `json:"antonyms"`
-		}
+	for _, d := range tr.WordDicts {
 
 		plainPrinterDefinition("  [word] ", d.Definition)
 		for _, syn := range d.Synonyms {
@@ -504,6 +504,7 @@ func plainSlicePrinter(tr []TranslateAndDicts) {
 		plainPrinter(each)
 	}
 }
+
 func jsonPrinter(tr TranslateAndDicts) {
 	j, err := json.Marshal(tr)
 	if err == nil {
