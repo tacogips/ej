@@ -22,11 +22,11 @@ import (
 	"google.golang.org/api/option"
 )
 
-const EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
 const (
-	BOLT_TRANSLATE_BUCKET  = "trans_cache"
-	BOLT_DICT_BUCKET       = "dict_cache"
-	BOLT_URBAN_DICT_BUCKET = "urban_dict_cache"
+	EJ_GOOGLE_TRANS_API_KEY_ENV = "EJ_GOOGLE_TRANS_API_KEY"
+	BOLT_TRANSLATE_BUCKET       = "trans_cache"
+	BOLT_DICT_BUCKET            = "dict_cache"
+	BOLT_URBAN_DICT_BUCKET      = "urban_dict_cache"
 
 	MAX_FETCH_DICT_WORD_NUM_AT_ONE = 4
 
@@ -183,7 +183,9 @@ func main() {
 		return nil
 	}
 
-	app.Run(os.Args)
+	if err := app.Run(os.Args); err != nil {
+		panic(err)
+	}
 }
 
 var noDefinitionAPIKey = errors.New("no definitiion api key")
