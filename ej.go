@@ -8,6 +8,7 @@ import (
 	"html"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -257,7 +258,8 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 func fetchUrbanDict(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) UrbanDict {
 
 	var fetchFromUrban = func(engSentense string) (UrbanDict, bool) {
-		url := fmt.Sprintf("http://api.urbandictionary.com/v0/define?term=%s", engSentense)
+
+		url := fmt.Sprintf("http://api.urbandictionary.com/v0/define?term=%s", url.QueryEscape(engSentense))
 
 		r, err := http.Get(url)
 		if err != nil {
