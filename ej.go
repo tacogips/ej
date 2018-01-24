@@ -236,8 +236,10 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 			result.Translate = tr
 			if !noDict {
 				if tr.IsInputIsEng() {
+					result.UrbanDict = fetchUrbanDict(db, tr.Input, true, false)
 					result.WordDicts = fetchDictOfWords(db, tr.Input, true, false)
 				} else if tr.IsTranslatedIsEng() {
+					result.UrbanDict = fetchUrbanDict(db, tr.Translated, true, false)
 					result.WordDicts = fetchDictOfWords(db, tr.Translated, true, false)
 				}
 			}
@@ -253,7 +255,7 @@ func fetchTranslationFromCache(db *bolt.DB, src string, noDict bool) (TranslateA
 func fetchUrbanDict(db *bolt.DB, engSentense string, onlyFromCache bool, notUseCache bool) UrbanDict {
 
 	var fetchFromUrban = func(engSentense string) (UrbanDict, bool) {
-		url := fmt.Sprintf("http://api.urbandictionary.com/v0/define?term=?sp=%s", engSentense)
+		url := fmt.Sprintf("http://api.urbandictionary.com/v0/define?term=%s", engSentense)
 
 		r, err := http.Get(url)
 		if err != nil {
@@ -593,13 +595,19 @@ func plainPrinter(tr TranslateAndDicts) {
 	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
 
 	// show urban
-	fmt.Fprintf(os.Stdout, "urban tags %s \n", strings.Join(tr.UrbanDict.Tags, ","))
+	fmt.Fprintf(os.Stdout, "==== urban tags <%s> \n", strings.Join(tr.UrbanDict.Tags, ", "))
 
-	for _, urban := range tr.UrbanDict.UrbanDictList {
-		fmt.Fprintf(os.Stdout, " word:%s \n", urban.Word)
-		fmt.Fprintf(os.Stdout, " def: %s \n", urban.Definition)
-		fmt.Fprintf(os.Stdout, " e.g: %s \n", urban.Example)
+	for idx, urban := range tr.UrbanDict.UrbanDictList {
+		fmt.Fprintf(os.Stdout, " \n---- urban no %d  ------------------------- \n", idx+1)
+		fmt.Fprintf(os.Stdout, "word:<%s> \n", urban.Word)
+		fmt.Fprintf(os.Stdout, "def:\n")
+		fmt.Fprintf(os.Stdout, "%s \n", urban.Definition)
+
+		fmt.Fprintf(os.Stdout, "e.g \n")
+		fmt.Fprintf(os.Stdout, "%s \n", urban.Example)
 	}
+
+	fmt.Fprintf(os.Stdout, "\n==== word dect \n")
 
 	for _, d := range tr.WordDicts {
 
