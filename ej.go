@@ -32,6 +32,8 @@ const (
 	MAX_FETCH_DICT_WORD_NUM_AT_ONE = 4
 
 	MAX_FETCH_DEF_NUM = 3
+
+	MAX_URBAN_DICT_RESULT_NUM = 4
 )
 
 var dictDefSanitizer = regexp.MustCompile("\t")
@@ -279,6 +281,11 @@ func fetchUrbanDict(db *bolt.DB, engSentense string, onlyFromCache bool, notUseC
 		}
 
 		dict.Input = engSentense
+
+		if len(dict.UrbanDictList) > MAX_URBAN_DICT_RESULT_NUM {
+			dict.UrbanDictList = dict.UrbanDictList[:MAX_URBAN_DICT_RESULT_NUM]
+		}
+
 		return dict, true
 	}
 
