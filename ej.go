@@ -640,7 +640,7 @@ func newTranslate(inputLang language.Tag, input string, translatedLang language.
 		InputLang:      inputLang.String(),
 		Translated:     html.UnescapeString(translated),
 		TranslatedLang: translatedLang.String(),
-		RefNum:         1,
+		RefNum:         0,
 		LastReferedAt:  time.Now().Unix(),
 	}
 }
