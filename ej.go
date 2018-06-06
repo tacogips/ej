@@ -1,6 +1,8 @@
+// this source code is naive ugly due to intention of private use. i dont wanna type keys many time.
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,6 +69,10 @@ func main() {
 			Usage: "force reverse translation(some language to english) ",
 		},
 		cli.BoolFlag{
+			Name:  "m",
+			Usage: "merge json cache file from stdin ",
+		},
+		cli.BoolFlag{
 			Name:  "json",
 			Usage: "output in json format",
 		},
@@ -91,6 +97,41 @@ func main() {
 			return err
 		}
 		defer cacheDB.Close()
+
+		if c.Bool("m") { // merge cache file
+			jsonCache, err := readFromStdin()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to read json cache %+v \n", err)
+				return err
+			}
+
+			cache := []TranslateAndDicts{}
+			err = json.Unmarshal(jsonCache, &cache)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshall json cache %+v \n", err)
+				return err
+			}
+			for _, eachTran := range cache {
+
+				err = putTranslationToCache(cacheDB, eachTran.Translate)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "failed to merge tlanslate %+v \n", err)
+				}
+
+				err = putUrbanDictToCache(cacheDB, eachTran.UrbanDict)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "failed to merge urban dict %+v \n", err)
+				}
+				for _, dict := range eachTran.WordDicts {
+					err = putDictToCache(cacheDB, dict)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "failed to merge word dict %+v \n", err)
+					}
+				}
+			}
+
+			return nil
+		}
 
 		noDict := c.Bool("nd")
 		if c.Bool("l") { // list cached
@@ -666,4 +707,13 @@ func jsonSlicePrinter(tr []TranslateAndDicts) {
 	if err == nil {
 		fmt.Fprintf(os.Stdout, "%s\n", string(j))
 	}
+}
+
+func readFromStdin() ([]byte, error) {
+	r := bufio.NewReader(os.Stdin)
+	input, _, err := r.ReadLine()
+	if err != nil {
+		return nil, err
+	}
+	return input, nil
 }
