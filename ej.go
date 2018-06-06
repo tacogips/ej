@@ -13,7 +13,9 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/text/language"
 
@@ -46,7 +48,7 @@ func main() {
 
 	app.Usage = "ej [sentense]"
 	app.Commands = nil
-	app.Version = "0.0.4"
+	app.Version = "0.0.5"
 	app.Flags = []cli.Flag{
 		cli.BoolFlag{
 			Name:  "l",
@@ -107,6 +109,11 @@ func main() {
 			t, found := fetchTranslationFromCache(cacheDB, src, noDict)
 			if found {
 				printer(t)
+
+				t.Translate.RefNum = t.Translate.RefNum + 1
+				t.Translate.LastReferedAt = time.Now().Unix()
+				err = putTranslationToCache(cacheDB, t.Translate)
+
 				return nil
 			}
 		}
@@ -219,6 +226,10 @@ func fetchCacheList(db *bolt.DB, noDict bool) []TranslateAndDicts {
 
 		return nil
 	})
+	sort.Slice(cachedResults, func(i, j int) bool {
+		return cachedResults[i].Translate.LastReferedAt > cachedResults[j].Translate.LastReferedAt
+	})
+
 	return cachedResults
 }
 
@@ -570,6 +581,8 @@ type Translate struct {
 	InputLang      string `json:"input_lang"`
 	Translated     string `json:"translated"`
 	TranslatedLang string `json:"translated_lang"`
+	RefNum         int    `json:"ref_num,omitempty"`
+	LastReferedAt  int64  `json:"last_refered_at,omitempty"`
 }
 
 func (tr Translate) IsInputIsEng() bool {
@@ -586,6 +599,8 @@ func newTranslate(inputLang language.Tag, input string, translatedLang language.
 		InputLang:      inputLang.String(),
 		Translated:     html.UnescapeString(translated),
 		TranslatedLang: translatedLang.String(),
+		RefNum:         1,
+		LastReferedAt:  time.Now().Unix(),
 	}
 }
 
@@ -603,7 +618,7 @@ func plainPrinterDefinition(prefix string, def Definition) {
 }
 
 func plainPrinter(tr TranslateAndDicts) {
-	fmt.Fprintf(os.Stdout, "%s\n%s\n", tr.Translate.Input, tr.Translate.Translated)
+	fmt.Fprintf(os.Stdout, "%s\n%s\nsearched %d times \n", tr.Translate.Input, tr.Translate.Translated, tr.Translate.RefNum+1)
 
 	// show urban
 	fmt.Fprintf(os.Stdout, "==== urban tags <%s> \n", strings.Join(tr.UrbanDict.Tags, ", "))
